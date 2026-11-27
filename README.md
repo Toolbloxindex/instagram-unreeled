@@ -75,6 +75,14 @@ Bug reports are most useful when they include:
 
 Pull requests are welcome. Keep the script a single dependency-free file.
 
+To run the tests (they use a local mock of Instagram, not the real site):
+
+```sh
+npm install
+npx playwright install webkit
+npm test
+```
+
 ## License
 
 [MIT](LICENSE)

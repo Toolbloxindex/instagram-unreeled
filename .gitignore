@@ -1,2 +1,5 @@
 .DS_Store
 *.backup.user.js
+node_modules/
+test/shots/
+package-lock.json

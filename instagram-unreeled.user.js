@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Unreeled
 // @namespace    https://github.com/Toolbloxindex/instagram-unreeled
-// @version      3.5.1
+// @version      3.5.2
 // @description  Instagram without Reels, Explore or the feed: just DMs, Stories (as a grid) and your profile.
 // @author       Tomás Correia
 // @license      MIT
@@ -39,6 +39,7 @@
   const storyGridAttr = 'data-ig-focus-story-grid';
   const storyTileAttr = 'data-ig-focus-story-tile';
   const storyStateAttr = 'data-ig-focus-story-state';
+  const coverAttr = 'data-ig-focus-cover';
   const profileCheckedKey = 'ig-focus-profile-checked';
 
   const controlSelector = 'a[href], button, [role="button"], [role="link"], [role="menuitem"], [tabindex="0"], label[for], label:has(input[type="file"])';
@@ -313,6 +314,9 @@
   let moreStories;
   let storyLayoutButton;
   let showNativeStories = false;
+  let leftViewerAt = 0;
+  let lastCoverScan = 0;
+  let covers = new Set();
   let pagingStories = false;
   const storyRecords = new Map();
 
@@ -582,6 +586,7 @@
       revealedMenu = null;
       revealedMenuOpened = false;
     }
+    if (currentView === 'viewer' && view !== 'viewer') leftViewerAt = performance.now();
     currentView = view;
     lastAllowedURL = lastCheckedURL = url;
     if (root.getAttribute(viewAttr) !== view) root.setAttribute(viewAttr, view);
@@ -924,17 +929,62 @@
     return { key, href, image, label };
   }
 
-  function openOriginalStory(record) {
+  function liveStoryNode(record) {
     const node = record.native;
-    if (record.key !== 'own' && node?.isConnected &&
-      storyDetails({ element: node, tile: record.tile }).key === record.key) {
-      node.click();
-      return;
-    }
+    if (!node?.isConnected || !record.tile?.isConnected) return null;
+    return storyDetails({ element: node, tile: record.tile }).key === record.key ? node : null;
+  }
 
-    setNativeStoryLayout(true);
-    if (record.scroller?.isConnected) record.scroller.scrollLeft = record.offset;
-    node?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  const pause = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+
+  // Instagram's strip is virtualised: only items near its scroll position
+  // exist in the DOM, and it is rebuilt (scrolled back to the start) after
+  // closing a story. Scroll the hidden strip until the story's item exists
+  // again, then open it, instead of giving up and showing the strip.
+  async function findStoryNode(record) {
+    let node = liveStoryNode(record);
+    if (node) return node;
+    const scrollers = () => [...storySources].flatMap(storyScrollers);
+    for (const scroller of scrollers()) scroller.scrollLeft = record.offset || 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await pause(120);
+      refresh();
+      if ((node = liveStoryNode(record))) return node;
+    }
+    for (const scroller of scrollers()) scroller.scrollLeft = 0;
+    for (let step = 0; step < 40; step++) {
+      await pause(150);
+      refresh();
+      if ((node = liveStoryNode(record))) return node;
+      const paging = storyPagingControl();
+      if (!paging) break;
+      if (paging.next) paging.next.click();
+      else paging.scroller.scrollLeft += Math.max(paging.scroller.clientWidth - 48, 32);
+    }
+    return null;
+  }
+
+  let openingStory = false;
+
+  async function openOriginalStory(record) {
+    if (openingStory) return;
+    openingStory = true;
+    record.card.setAttribute('aria-busy', 'true');
+    try {
+      const node = await findStoryNode(record);
+      if (currentView !== 'stories') return;
+      if (node) {
+        node.click();
+        return;
+      }
+      // Last resort: show Instagram's own strip at the story's position.
+      setNativeStoryLayout(true);
+      for (const scroller of [...storySources].flatMap(storyScrollers)) scroller.scrollLeft = record.offset || 0;
+      setStatus('Couldn’t open that story from the grid. Tap it in the strip.');
+    } finally {
+      openingStory = false;
+      record.card.removeAttribute('aria-busy');
+    }
   }
 
   function addStoryRecords(items, source) {
@@ -976,6 +1026,88 @@
       record.scroller = scroller;
       record.offset = scroller?.scrollLeft || 0;
     }
+  }
+
+
+  // Instagram sometimes leaves an element drawn over the Stories grid after a
+  // story is closed (a dark box at the top of the screen). Find anything that
+  // is not this script's UI but paints over the visible part of the grid and
+  // make it transparent. Real menus and panels stay visible: an element is
+  // only hidden when it has no text or buttons, or when it appeared right
+  // after leaving the story viewer.
+  function describe(element) {
+    const rect = element.getBoundingClientRect();
+    return element.tagName.toLowerCase() +
+      (element.getAttribute('role') ? '[role=' + element.getAttribute('role') + ']' : '') +
+      (element.getAttribute('aria-label') ? '[aria-label="' + element.getAttribute('aria-label') + '"]' : '') +
+      ' ' + getComputedStyle(element).position + ' ' +
+      Math.round(rect.left) + ',' + Math.round(rect.top) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height);
+  }
+
+  function paints(element, style) {
+    if (/^(?:img|video|canvas|svg|picture)$/i.test(element.tagName)) return true;
+    const background = style.backgroundColor;
+    return (background && background !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(background)) ||
+      style.backgroundImage !== 'none';
+  }
+
+  function hasContent(element) {
+    if (element.innerText?.trim()) return true;
+    return [...element.querySelectorAll(controlSelector)].some(control =>
+      control.getClientRects().length > 0 && canActivate(control));
+  }
+
+  function findCovers() {
+    const next = new Set();
+    if (currentView !== 'stories' || showNativeStories || !storyPanel?.isConnected || !storyGrid || storyGrid.hidden) return next;
+    const area = storyGrid.getBoundingClientRect();
+    const top = Math.max(area.top, 0);
+    const bottom = Math.min(area.bottom, innerHeight);
+    if (bottom - top < 20) return next;
+    const justLeftViewer = performance.now() - leftViewerAt < 6000;
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(element) {
+        if (element.hasAttribute(chrome) || element.matches('script, style, template, link, meta')) return NodeFilter.FILTER_REJECT;
+        const style = getComputedStyle(element);
+        if (style.display === 'none') return NodeFilter.FILTER_REJECT;
+        // Already hidden by this script (its opacity is ours): keep it hidden.
+        if (element.hasAttribute(coverAttr)) {
+          next.add(element);
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (style.opacity === '0') return NodeFilter.FILTER_REJECT;
+        if (style.visibility === 'hidden' || element.contains(storyPanel)) return NodeFilter.FILTER_SKIP;
+        const rect = element.getBoundingClientRect();
+        const overlap = Math.min(rect.bottom, bottom) - Math.max(rect.top, top);
+        const width = Math.min(rect.right, area.right) - Math.max(rect.left, area.left);
+        if (overlap < 40 || width < area.width * 0.3 || !paints(element, style)) return NodeFilter.FILTER_SKIP;
+        // Keep the outermost painting element whose subtree holds nothing of
+        // ours. Story sources stay laid out (only made transparent).
+        let cover = element;
+        for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+          if (parent.contains(storyPanel) || parent.hasAttribute(branch) || parent.hasAttribute(keep) && !parent.matches(overlays)) break;
+          cover = parent;
+        }
+        if (!justLeftViewer && hasContent(cover)) return NodeFilter.FILTER_SKIP;
+        next.add(cover);
+        return NodeFilter.FILTER_REJECT;
+      }
+    });
+    while (walker.nextNode()) {
+      // acceptNode does the work.
+    }
+    return next;
+  }
+
+  function updateCovers(force = false) {
+    const now = performance.now();
+    if (!force && now - lastCoverScan < 400) return;
+    lastCoverScan = now;
+    const next = findCovers();
+    for (const element of next) {
+      if (!covers.has(element)) console.info('[Instagram Unreeled] hid an element covering the Stories grid:', describe(element));
+    }
+    covers = setMarks(coverAttr, covers, next);
   }
 
   function isolateStories(controls) {
@@ -1174,6 +1306,11 @@
           font: inherit;
         }
         [${chrome}="story-panel"] [hidden] { display: none !important; }
+        html[${viewAttr}="stories"] [${coverAttr}] {
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+        html[${viewAttr}="stories"] [${coverAttr}] * { pointer-events: none !important; }
 
         body:has(> [${chrome}="bottom"]) {
           padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
@@ -1287,6 +1424,7 @@
       if (ownProfile !== previousProfile) syncRoute();
     }
     isolateStories(controls);
+    updateCovers();
   }
 
   let refreshPending = false;
@@ -1315,5 +1453,6 @@
   // Isolated extension worlds cannot see page-side History API calls.
   window.setInterval(() => {
     if (location.href !== lastCheckedURL) refresh();
+    else if (currentView === 'stories' && !showNativeStories && document.body) updateCovers();
   }, 150);
 })();

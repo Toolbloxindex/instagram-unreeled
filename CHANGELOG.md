@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.5.2
+
+- **Fixed:** tapping a story in the grid sometimes showed the original strip instead of opening the story. Instagram only keeps nearby stories loaded, so the script now scrolls its hidden strip to the story and opens it.
+- **Fixed:** the dark box covering the Stories grid after closing a story. While the grid is showing, the script now hides anything Instagram leaves on top of it. It logs what it hid to the console, so the cause can be confirmed.
+- **New:** automated test (`npm test`) against a local mock of Instagram's stories strip.
+
 ## 3.5.1
 
 - **Fixed:** a large dark block could cover the Stories grid after closing a story.
