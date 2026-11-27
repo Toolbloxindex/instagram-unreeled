@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Unreeled
 // @namespace    https://github.com/Toolbloxindex/instagram-unreeled
-// @version      3.5.2
+// @version      3.5.3
 // @description  Instagram without Reels, Explore or the feed: just DMs, Stories (as a grid) and your profile.
 // @author       Tomás Correia
 // @license      MIT
@@ -1224,6 +1224,23 @@
           pointer-events: none !important;
         }
         html[${viewAttr}="stories"] [${storySourceAttr}="background"] * {
+          pointer-events: none !important;
+        }
+        /* Instagram's page stays mounted so the strip keeps working, but it
+           must not take up room. After a story closes, Instagram re-renders
+           home in a full-screen loading layout; left in the flow, that empty
+           screen sat above the grid as a dark box. Grid layout only: the
+           original strip layout shows Instagram's page as it is. */
+        html[${viewAttr}="stories"] body:has(> [${chrome}="story-panel"] > [${storyGridAttr}]:not([hidden])) > [${branch}]:not([${keep}]) {
+          position: fixed !important;
+          top: 0 !important;
+          left: 0 !important;
+          width: 100% !important;
+          height: 0 !important;
+          min-height: 0 !important;
+          overflow: visible !important;
+          z-index: -1 !important;
+          visibility: hidden !important;
           pointer-events: none !important;
         }
         [${storyGridAttr}] {

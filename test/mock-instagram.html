@@ -57,7 +57,9 @@ function renderHome() {
   };
   tray.addEventListener('scroll', paint);
   paint();
-  const main = h('main', { role: 'main' }, h('div', { class: 'column' }, tray,
+  // After a story closes, Instagram renders home in a loading layout: a
+  // full-screen main with the tray centred in it.
+  const main = h('main', { role: 'main', style: window.afterStory ? 'min-height:100vh;display:flex;flex-direction:column;justify-content:center' : '' }, h('div', { class: 'column' }, tray,
     ...Array.from({ length: 3 }, (_, i) => h('article', {}, 'Post ' + i))));
   const nav = h('div', { class: 'nav' },
     h('a', { href: '/' }, 'Home'), h('a', { href: '/explore/' }, 'Explore'), h('a', { href: '/reels/' }, 'Reels'),
@@ -78,6 +80,7 @@ function renderViewer(name) {
     h('div', {}, 'Viewing ' + name),
     h('button', { 'aria-label': 'Close', onclick: () => {
       users.find(u => u.name === name).seen = true;
+      window.afterStory = true;
       // Simulate Instagram leaving its closing layer behind: an empty dark
       // dialog pinned to the top of the screen.
       document.body.append(h('div', { role: 'dialog', class: 'remnant',

@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.5.3
+
+- **Fixed:** the dark box above the Stories grid, for real this time. The grid sat below Instagram's own (hidden) home page, and after a story closes Instagram rebuilds that page as a full-screen loading layout. That empty screen pushed the grid down. In grid mode Instagram's page no longer takes up any room.
+- **Tests:** the mock now reproduces the full-screen loading layout, and the test checks that the grid starts at the top after closing a story and that the original strip layout still works.
+
 ## 3.5.2
 
 - **Fixed:** tapping a story in the grid sometimes showed the original strip instead of opening the story. Instagram only keeps nearby stories loaded, so the script now scrolls its hidden strip to the story and opens it.

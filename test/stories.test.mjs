@@ -65,6 +65,8 @@ await page.locator('button[aria-label=Close]').tap();
 await page.waitForTimeout(1500);
 check('closing returns to the Stories grid', page.url().endsWith('/?ig-focus=stories'), page.url());
 check('grid still in grid mode after closing', (await gridHidden()) === false);
+const gridTop = await page.evaluate(() => Math.round(document.querySelector('[data-ig-focus-story-grid]').getBoundingClientRect().top));
+check('grid starts at the top after closing (no empty block above it)', gridTop < 120, 'grid top ' + gridTop + 'px');
 cards = await grid();
 check('user1 now marked seen', cards.find(c => c.name === 'user1')?.state === 'seen', cards.find(c => c.name === 'user1')?.state);
 await shot('3-after-close');
@@ -98,6 +100,24 @@ const intruders = await page.evaluate(() => {
 });
 check('no Instagram element paints over the grid', intruders.length === 0, intruders.slice(0, 5).join(' | '));
 await shot('5-final');
+
+// The original strip layout must still show Instagram's own strip.
+await page.getByRole('button', { name: 'Use original Stories strip' }).tap();
+await page.waitForTimeout(800);
+const strip = await page.evaluate(() => {
+  const tray = document.querySelector('.tray').getBoundingClientRect();
+  let visible = true;
+  for (let p = document.querySelector('.tray'); p; p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    if (cs.visibility === 'hidden' || Number(cs.opacity) === 0 || cs.display === 'none') visible = false;
+  }
+  return { visible, top: Math.round(tray.top), height: Math.round(tray.height) };
+});
+check('original strip layout shows the native strip', strip.visible && strip.height > 50 && strip.top >= 0 && strip.top < 900, JSON.stringify(strip));
+await shot('6-strip');
+await page.getByRole('button', { name: 'Show Stories grid' }).tap();
+await page.waitForTimeout(800);
+check('switching back shows the grid at the top', await page.evaluate(() => document.querySelector('[data-ig-focus-story-grid]').getBoundingClientRect().top) < 120);
 
 // A real panel with content, opened well after leaving the viewer, must stay.
 await page.waitForTimeout(6500);
