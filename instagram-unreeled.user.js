@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Instagram Unreeled
 // @namespace    https://github.com/Toolbloxindex/instagram-unreeled
-// @version      3.5.0
+// @version      3.5.1
 // @description  Instagram without Reels, Explore or the feed: just DMs, Stories (as a grid) and your profile.
 // @author       Tomás Correia
 // @license      MIT
@@ -989,7 +989,9 @@
         if (!tray.closest(feedItems)) content.add(tray);
       }
       for (const overlay of document.querySelectorAll(overlays)) {
-        if (!overlay.closest(feedItems)) content.add(overlay);
+        // Closed viewers and menus can stay in the DOM; only keep live ones.
+        if (overlay.closest(feedItems + ', [hidden], [inert], [aria-hidden="true"]')) continue;
+        content.add(overlay);
       }
       for (const element of controls) {
         if (element.closest(feedItems + ', [hidden], [inert]')) continue;
@@ -1076,10 +1078,20 @@
           display: none !important;
         }
 
+        /* The native strip stays laid out so the grid can read and page it,
+           but nothing inside it may paint or take taps. visibility: hidden
+           alone can be undone by any descendant with visibility: visible,
+           which showed up as a large dark box over the grid after closing a
+           story. Opacity and z-index apply to the whole subtree. */
         html[${viewAttr}="stories"] [${storySourceAttr}="background"] {
           position: fixed !important;
           inset: 0 0 auto !important;
+          z-index: -1 !important;
           visibility: hidden !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+        html[${viewAttr}="stories"] [${storySourceAttr}="background"] * {
           pointer-events: none !important;
         }
         [${storyGridAttr}] {

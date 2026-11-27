@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.5.1
+
+- **Fixed:** a large dark block could cover the Stories grid after closing a story.
+
 ## 3.5.0 (first public release)
 
 - **Fixed:** the Account tab sometimes didn't open your profile. It now loads your profile URL directly and remembers your username across tabs, per account.
