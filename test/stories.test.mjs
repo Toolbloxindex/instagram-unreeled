@@ -27,116 +27,66 @@ await context.route('**/*', route => {
 const page = await context.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
-page.on('console', m => { if (m.text().includes('Instagram Unreeled')) results.push('LOG   ' + m.text()); });
-
-const grid = () => page.evaluate(() => [...document.querySelectorAll('[data-ig-focus-story-tile]')].map(card => ({
-  name: card.textContent, state: card.getAttribute('data-ig-focus-story-state')
-})));
-const gridHidden = () => page.evaluate(() => document.querySelector('[data-ig-focus-story-grid]')?.hidden);
 const shot = name => page.screenshot({ path: path.join(dir, 'shots', `${label}-${name}.png`) });
 fs.mkdirSync(path.join(dir, 'shots'), { recursive: true });
 
-await page.goto('https://www.instagram.com/?ig-focus=stories');
-await page.waitForTimeout(4000); // let "Load more" page through the strip
-let cards = await grid();
-check('grid shows stories from the whole strip', cards.length === 30, cards.length + ' cards');
-const u1 = cards.find(c => c.name === 'user1');
-const u3 = cards.find(c => c.name === 'user3');
-check('unseen story marked unseen', u1?.state === 'unseen', u1?.state);
-check('seen story marked seen', u3?.state === 'seen', u3?.state);
-const order = cards.map(c => c.name);
-const firstSeenIndex = await page.evaluate(() => {
-  const tiles = [...document.querySelectorAll('[data-ig-focus-story-tile]')];
-  const pos = t => t.getBoundingClientRect();
-  const unseenBottom = Math.max(...tiles.filter(t => t.getAttribute('data-ig-focus-story-state') === 'unseen').map(t => pos(t).top));
-  const seenTop = Math.min(...tiles.filter(t => t.getAttribute('data-ig-focus-story-state') === 'seen').map(t => pos(t).top));
-  return seenTop >= unseenBottom;
-});
-check('seen stories are listed after unseen ones', firstSeenIndex);
-await shot('1-grid');
-
-// Open a story that is currently mounted, then close it.
-await page.locator('[data-ig-focus-story-tile]', { hasText: /^user1$/ }).tap();
-await page.waitForTimeout(800);
-check('tapping user1 opens its story', page.url().includes('/stories/user1/'), page.url());
-await shot('2-viewer');
-if (!page.url().includes('/stories/')) { check('grid fell back to the strip instead', await gridHidden() === true); await shot('2-fallback'); console.log(`\n== ${label} ==\n` + results.join('\n')); await browser.close(); process.exit(1); }
-await page.locator('button[aria-label=Close]').tap();
-await page.waitForTimeout(1500);
-check('closing returns to the Stories grid', page.url().endsWith('/?ig-focus=stories'), page.url());
-check('grid still in grid mode after closing', (await gridHidden()) === false);
-const gridTop = await page.evaluate(() => Math.round(document.querySelector('[data-ig-focus-story-grid]').getBoundingClientRect().top));
-check('grid starts at the top after closing (no empty block above it)', gridTop < 120, 'grid top ' + gridTop + 'px');
-cards = await grid();
-check('user1 now marked seen', cards.find(c => c.name === 'user1')?.state === 'seen', cards.find(c => c.name === 'user1')?.state);
-await shot('3-after-close');
-
-// The strip was rebuilt at the start, so user25's native item no longer exists.
-const mounted = await page.evaluate(() => [...document.querySelectorAll('.strip [role=button]')].map(b => b.textContent));
-check('precondition: user25 not mounted in the native strip', !mounted.includes('user25'), mounted.join(','));
-await page.locator('[data-ig-focus-story-tile]', { hasText: /^user25$/ }).scrollIntoViewIfNeeded();
-await page.locator('[data-ig-focus-story-tile]', { hasText: /^user25$/ }).tap();
-await page.waitForTimeout(3000);
-check('tapping an off-screen story (user25) opens it', page.url().includes('/stories/user25/'), page.url());
-check('it did not fall back to the strip layout', (await gridHidden()) !== true);
-await shot('4-offscreen-open');
-
-// Visible dark boxes over the grid after closing: anything other than the
-// script's own UI that paints within the viewport.
-await page.goBack();
-await page.waitForTimeout(1500);
-const intruders = await page.evaluate(() => {
-  const out = [];
-  for (const el of document.querySelectorAll('body *')) {
-    if (el.closest('[data-ig-focus-chrome]')) continue;
-    const r = el.getBoundingClientRect();
-    const cs = getComputedStyle(el);
-    if (r.width * r.height < 2000 || cs.visibility === 'hidden' || Number(cs.opacity) === 0) continue;
-    let hiddenByAncestor = false;
-    for (let p = el; p; p = p.parentElement) if (Number(getComputedStyle(p).opacity) === 0) hiddenByAncestor = true;
-    if (!hiddenByAncestor && r.bottom > 0 && r.top < innerHeight) out.push(el.tagName + '.' + el.className + ' ' + Math.round(r.top) + '-' + Math.round(r.bottom));
-  }
-  return out;
-});
-check('no Instagram element paints over the grid', intruders.length === 0, intruders.slice(0, 5).join(' | '));
-await shot('5-final');
-
-// The original strip layout must still show Instagram's own strip.
-await page.getByRole('button', { name: 'Use original Stories strip' }).tap();
-await page.waitForTimeout(800);
-const strip = await page.evaluate(() => {
-  const tray = document.querySelector('.tray').getBoundingClientRect();
+// Where the native strip is and whether it can be seen.
+const strip = () => page.evaluate(() => {
+  const tray = document.querySelector('.tray');
+  if (!tray) return { exists: false };
   let visible = true;
-  for (let p = document.querySelector('.tray'); p; p = p.parentElement) {
+  for (let p = tray; p; p = p.parentElement) {
     const cs = getComputedStyle(p);
     if (cs.visibility === 'hidden' || Number(cs.opacity) === 0 || cs.display === 'none') visible = false;
   }
-  return { visible, top: Math.round(tray.top), height: Math.round(tray.height) };
+  const r = tray.getBoundingClientRect();
+  return { exists: true, visible, top: Math.round(r.top), height: Math.round(r.height) };
 });
-check('original strip layout shows the native strip', strip.visible && strip.height > 50 && strip.top >= 0 && strip.top < 900, JSON.stringify(strip));
-await shot('6-strip');
-await page.getByRole('button', { name: 'Show Stories grid' }).tap();
-await page.waitForTimeout(800);
-check('switching back shows the grid at the top', await page.evaluate(() => document.querySelector('[data-ig-focus-story-grid]').getBoundingClientRect().top) < 120);
+const postsVisible = () => page.evaluate(() => [...document.querySelectorAll('article')]
+  .filter(a => a.getClientRects().length && getComputedStyle(a).visibility !== 'hidden').length);
 
-// A real panel with content, opened well after leaving the viewer, must stay.
-await page.waitForTimeout(6500);
-await page.evaluate(() => {
-  const panel = document.createElement('div');
-  panel.setAttribute('role', 'dialog');
-  panel.className = 'legit';
-  panel.style.cssText = 'position:fixed;top:120px;left:0;right:0;height:300px;background:#222;color:#fff';
-  panel.innerHTML = '<p>Notifications</p><button>Follow</button>';
-  document.body.append(panel);
-});
+await page.goto('https://www.instagram.com/?ig-focus=stories');
 await page.waitForTimeout(1500);
-const legit = await page.evaluate(() => {
-  const el = document.querySelector('.legit');
-  const cs = getComputedStyle(el);
-  return { display: cs.display, opacity: cs.opacity, marked: el.hasAttribute('data-ig-focus-cover') };
+let s = await strip();
+check('Stories tab shows Instagram\'s own strip', s.visible && s.height > 50, JSON.stringify(s));
+check('the strip is near the top', s.top < 200, 'top ' + s.top + 'px');
+check('feed posts are hidden', await postsVisible() === 0);
+check('no leftover grid', await page.evaluate(() => !document.querySelector('[data-ig-focus-story-grid], [data-ig-focus-chrome="story-panel"]')));
+await shot('1-strip');
+
+await page.locator('.strip [role=button]', { hasText: /^user1$/ }).tap();
+await page.waitForTimeout(800);
+check('tapping a story opens it', page.url().includes('/stories/user1/'), page.url());
+await page.locator('button[aria-label=Close]').tap();
+await page.waitForTimeout(1500);
+check('closing returns to Stories', page.url().endsWith('/?ig-focus=stories'), page.url());
+s = await strip();
+// The mock re-renders home as a full-screen loading column after a story.
+check('strip still visible and at the top after closing', s.visible && s.top < 200, JSON.stringify(s));
+check('feed posts still hidden after closing', await postsVisible() === 0);
+await shot('2-after-close');
+
+// Scrolling the strip loads more stories (it is virtualised).
+await page.evaluate(() => { document.querySelector('.tray').scrollLeft = 1800; });
+await page.waitForTimeout(500);
+const later = await page.evaluate(() => [...document.querySelectorAll('.strip [role=button]')].map(b => b.textContent));
+check('scrolling the strip shows later stories', later.includes('user25'), later.join(','));
+
+// DM thread: the conversation must stay visible.
+await page.goto('https://www.instagram.com/direct/t/123/');
+await page.waitForTimeout(1500);
+const chat = await page.evaluate(() => {
+  const thread = document.querySelector('.thread');
+  if (!thread) return { exists: false };
+  let visible = true;
+  for (let p = thread; p; p = p.parentElement) {
+    const cs = getComputedStyle(p);
+    if (cs.visibility === 'hidden' || cs.display === 'none') visible = false;
+  }
+  return { exists: true, visible, box: document.querySelector('.thread textarea')?.getClientRects().length > 0 };
 });
-check('a real panel with content is not hidden', legit.display !== 'none' && legit.opacity !== '0' && !legit.marked, JSON.stringify(legit));
-const logs = await page.evaluate(() => window.__coverLogs || []);
+check('a DM conversation is shown with its message box', chat.visible && chat.box, JSON.stringify(chat));
+await shot('3-chat');
 
 check('no page errors', errors.length === 0, errors.join(' | '));
 console.log(`\n== ${label} ==\n` + results.join('\n'));

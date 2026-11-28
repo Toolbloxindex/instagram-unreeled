@@ -81,17 +81,31 @@ function renderViewer(name) {
     h('button', { 'aria-label': 'Close', onclick: () => {
       users.find(u => u.name === name).seen = true;
       window.afterStory = true;
-      // Simulate Instagram leaving its closing layer behind: an empty dark
-      // dialog pinned to the top of the screen.
-      document.body.append(h('div', { role: 'dialog', class: 'remnant',
-        style: 'position:fixed;top:0;left:0;right:0;height:550px;background:#0c1014;z-index:20' }));
       history.back();
     } }, 'Close')));
 }
 
+function renderChat(id) {
+  // Mobile DM thread as it loads: one wrapper holds Instagram's tab links and
+  // a spinner, then the conversation (no <main>/<header>) is added to it.
+  const wrap = h('div', { class: 'wrap' },
+    h('a', { href: '/' }, 'Home'), h('a', { href: '/explore/' }, 'Explore'),
+    h('a', { href: '/reels/' }, 'Reels'), h('a', { href: '/direct/inbox/' }, 'Messages'),
+    h('div', { class: 'loading' }, 'Loading...'));
+  root.replaceChildren(wrap);
+  setTimeout(() => {
+    wrap.querySelector('.loading').remove();
+    wrap.append(h('div', { class: 'thread' }, h('div', {}, 'Chat ' + id),
+      h('div', { role: 'grid', 'aria-label': 'Messages in conversation' }, h('div', { role: 'row' }, 'hello')),
+      h('textarea', { placeholder: 'Message...' })));
+  }, 600);
+}
+
 function route() {
   const m = location.pathname.match(/^\/stories\/([^/]+)\//);
-  if (m) renderViewer(m[1]);
+  const t = location.pathname.match(/^\/direct\/t\/([^/]+)\//);
+  if (t) renderChat(t[1]);
+  else if (m) renderViewer(m[1]);
   else if (location.pathname === '/') renderHome();
   else root.replaceChildren(h('main', { role: 'main' }, 'Page ' + location.pathname));
 }

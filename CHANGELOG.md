@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.6.0
+
+- **Changed:** the Stories grid is gone. The Stories tab now shows Instagram's own strip at the top of the page, without the feed. The grid depended on too many details of Instagram's page and sometimes failed to open a story or left a dark box over it.
+- **Fixed:** a DM conversation could stay blank on iPhone. While a conversation loads, the script could mistake its container for Instagram's tab bar and hide it. Anything holding a message box or message list is now never hidden.
+- **Tests:** rewritten for the strip and a DM conversation that loads in stages.
+
 ## 3.5.3
 
 - **Fixed:** the dark box above the Stories grid, for real this time. The grid sat below Instagram's own (hidden) home page, and after a story closes Instagram rebuilds that page as a full-screen loading layout. That empty screen pushed the grid down. In grid mode Instagram's page no longer takes up any room.

@@ -4,7 +4,7 @@ A userscript that turns instagram.com into a distraction-free messenger.
 
 - **Blocked:** Reels, Explore, Search and the Home feed. Reel links redirect to your messages.
 - **Kept:** Direct Messages, Stories, notifications, your profile, settings and account switching.
-- **Stories as a grid:** all stories on one screen instead of a sideways strip. New stories have a coloured ring; stories you've already watched are faded and moved to the end.
+- **Stories:** Instagram's own stories strip, at the top of an otherwise empty page, with no feed underneath.
 - **Simple bottom bar:** Messages · Account · Stories.
 
 It works best on a phone browser, where Instagram's app would otherwise pull you into Reels.
@@ -49,7 +49,7 @@ The script declares an `@updateURL`, so Violentmonkey and Tampermonkey update it
 Instagram doesn't offer an API for any of this, so the script reads the page structure (links, labels and landmarks) and hides or rearranges parts of it.
 
 - Blocked routes (`/reels/`, `/explore/`, …) are stopped both on click and on navigation.
-- Stories are read from Instagram's own story tray. Seen/unseen comes from the tray's accessibility labels ("Story by …, seen"), with the ring colour as a fallback.
+- The Stories tab keeps Instagram's own story tray and hides everything else on the home page.
 - Your username comes from the same request Instagram's Edit profile page makes, so the Account tab works in new tabs.
 
 ### Privacy

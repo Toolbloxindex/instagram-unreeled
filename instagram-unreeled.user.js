@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Instagram Unreeled
 // @namespace    https://github.com/Toolbloxindex/instagram-unreeled
-// @version      3.5.3
-// @description  Instagram without Reels, Explore or the feed: just DMs, Stories (as a grid) and your profile.
+// @version      3.6.0
+// @description  Instagram without Reels, Explore or the feed: just DMs, Stories and your profile.
 // @author       Tomás Correia
 // @license      MIT
 // @homepageURL  https://github.com/Toolbloxindex/instagram-unreeled
@@ -35,11 +35,6 @@
   const keep = 'data-ig-focus-keep';
   const hiddenControl = 'data-ig-focus-hidden-control';
   const hiddenBar = 'data-ig-focus-hidden-bar';
-  const storySourceAttr = 'data-ig-focus-story-source';
-  const storyGridAttr = 'data-ig-focus-story-grid';
-  const storyTileAttr = 'data-ig-focus-story-tile';
-  const storyStateAttr = 'data-ig-focus-story-state';
-  const coverAttr = 'data-ig-focus-cover';
   const profileCheckedKey = 'ig-focus-profile-checked';
 
   const controlSelector = 'a[href], button, [role="button"], [role="link"], [role="menuitem"], [tabindex="0"], label[for], label:has(input[type="file"])';
@@ -308,17 +303,6 @@
   let style;
   let storyBranches = new Set();
   let storyContent = new Set();
-  let storySources = new Set();
-  let storyPanel;
-  let storyGrid;
-  let moreStories;
-  let storyLayoutButton;
-  let showNativeStories = false;
-  let leftViewerAt = 0;
-  let lastCoverScan = 0;
-  let covers = new Set();
-  let pagingStories = false;
-  const storyRecords = new Map();
 
   const icons = {
     messages: '<path d="M21 11.5a9 9 0 0 1-9 9 9.6 9.6 0 0 1-3.6-.7L3 21l1.3-4.7A9 9 0 1 1 21 11.5Z"/>',
@@ -586,7 +570,6 @@
       revealedMenu = null;
       revealedMenuOpened = false;
     }
-    if (currentView === 'viewer' && view !== 'viewer') leftViewerAt = performance.now();
     currentView = view;
     lastAllowedURL = lastCheckedURL = url;
     if (root.getAttribute(viewAttr) !== view) root.setAttribute(viewAttr, view);
@@ -690,7 +673,10 @@
     // A "bar" must never be a wrapper around page content. Profile pages can
     // render briefly without <main>/<header> while loading; the old check could
     // then pick a page-wide wrapper and hide the whole profile.
-    const pageContent = 'main, [role="main"], header, article, a[href*="/p/"], ' + storyTrays;
+    // A DM conversation can load without <main>/<header>; its message box or
+    // message list marks the wrapper as page content too.
+    const pageContent = 'main, [role="main"], header, article, a[href*="/p/"], textarea, [role="textbox"], ' +
+      '[contenteditable="true"], [role="grid"], [role="log"], ' + storyTrays;
     for (const tab of removed) {
       for (let parent = tab.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
         if (parent.matches(outsideContent) || parent.querySelector(pageContent)) break;
@@ -767,353 +753,9 @@
     return source;
   }
 
-  function storyScrollers(source) {
-    return [source, ...source.querySelectorAll('div, ul, ol, section')].filter(element =>
-      element.clientWidth > 0 && element.scrollWidth > element.clientWidth + 2 &&
-      /^(?:auto|scroll|overlay|hidden)$/.test(getComputedStyle(element).overflowX));
-  }
-
-  function storyPagingControl() {
-    for (const source of storySources) {
-      const arrows = [...source.querySelectorAll(controlSelector)].filter(element =>
-        hasName(element, labels.nextStories) && !element.closest(storyItem) && element.getClientRects().length > 0);
-      if (arrows.length) {
-        const next = arrows.find(canActivate);
-        if (next) return { next };
-        continue;
-      }
-      const scroller = storyScrollers(source).find(element =>
-        Math.abs(element.scrollLeft) < element.scrollWidth - element.clientWidth - 2);
-      if (scroller) return { scroller };
-    }
-    return null;
-  }
-
-  function advanceStories() {
-    if (pagingStories || showNativeStories || currentView !== 'stories') return;
-    const paging = storyPagingControl();
-    if (!paging) return;
-    pagingStories = true;
-    moreStories.disabled = true;
-    const startingCount = storyRecords.size;
-    if (paging.next) paging.next.click();
-    else {
-      const scroller = paging.scroller;
-      const direction = getComputedStyle(scroller).direction === 'rtl' ? -1 : 1;
-      scroller.scrollBy({ left: direction * Math.max(scroller.clientWidth - 48, 32), behavior: 'instant' });
-    }
-    window.setTimeout(() => {
-      pagingStories = false;
-      if (currentView !== 'stories') return;
-      refresh();
-      if (storyRecords.size > startingCount && !moreStories.hidden &&
-        moreStories.getBoundingClientRect().top < innerHeight + 100) advanceStories();
-    }, 500);
-  }
-
-  function setNativeStoryLayout(native) {
-    showNativeStories = native;
-    refresh();
-  }
-
-  function mountStoryPanel() {
-    if (!storyPanel) {
-      storyPanel = document.createElement('section');
-      storyPanel.setAttribute(chrome, 'story-panel');
-      storyPanel.setAttribute('aria-label', 'Stories from Instagram');
-      storyGrid = document.createElement('div');
-      storyGrid.setAttribute(storyGridAttr, '');
-      moreStories = control('button', 'Load more stories', { onClick: advanceStories });
-      storyLayoutButton = control('button', 'Use original Stories strip', {
-        onClick: () => setNativeStoryLayout(!showNativeStories)
-      });
-      const commands = document.createElement('div');
-      commands.setAttribute('data-ig-focus-story-actions', '');
-      commands.append(moreStories, storyLayoutButton);
-      storyPanel.append(storyGrid, commands);
-      const nearEnd = new IntersectionObserver(entries => {
-        if (entries.some(entry => entry.isIntersecting)) advanceStories();
-      }, { rootMargin: '100px' });
-      nearEnd.observe(moreStories);
-    }
-    if (!storyPanel.isConnected) document.body.insertBefore(storyPanel, bottom);
-  }
-
-  // Instagram labels tray items like "Story by name, not seen" / "…, seen".
-  // Usernames cannot contain commas, so only the text after the last comma
-  // is checked.
-  const unseenState = /^(?:not seen|unseen|new|não vist[oa]|não visualizad[oa]|nova|novo|niet bekeken|nieuw)$/i;
-  const seenState = /^(?:seen|viewed|vist[oa]|visualizad[oa]|bekeken|gezien)$/i;
-
-  function labelledSeen(item) {
-    const nodes = [item.element, item.tile, ...item.tile.querySelectorAll('[aria-label]')];
-    for (const node of nodes) {
-      const label = node.getAttribute('aria-label');
-      if (!label?.includes(',')) continue;
-      const state = label.slice(label.lastIndexOf(',') + 1).trim();
-      if (unseenState.test(state)) return false;
-      if (seenState.test(state)) return true;
-    }
-    return null;
-  }
-
-  // Fallback: Instagram draws the story ring on a <canvas>. A coloured ring
-  // (gradient, or green for Close Friends) means unseen; a grey one means seen.
-  // The canvas is copied into a private one, so Instagram's own drawing
-  // context is never touched.
-  const ringCache = new WeakMap();
-  let ringProbe;
-
-  function ringSeen(tile) {
-    const canvas = tile.querySelector('canvas');
-    if (!canvas?.width || !canvas.height) return null;
-    const cached = ringCache.get(canvas);
-    const now = performance.now();
-    if (cached && now - cached.time < 1500) return cached.value;
-    let value = null;
-    try {
-      const size = 48;
-      ringProbe ||= document.createElement('canvas');
-      ringProbe.width = ringProbe.height = size;
-      const context = ringProbe.getContext('2d', { willReadFrequently: true });
-      context.imageSmoothingEnabled = false;
-      context.clearRect(0, 0, size, size);
-      context.drawImage(canvas, 0, 0, size, size);
-      const { data } = context.getImageData(0, 0, size, size);
-      let colored = 0;
-      let neutral = 0;
-      const center = (size - 1) / 2;
-      for (let y = 0; y < size; y++) {
-        for (let x = 0; x < size; x++) {
-          // Only sample the outer band, where the ring is drawn.
-          if (Math.hypot(x - center, y - center) < size * 0.4) continue;
-          const i = (y * size + x) * 4;
-          if (data[i + 3] < 100) continue;
-          const max = Math.max(data[i], data[i + 1], data[i + 2]);
-          const min = Math.min(data[i], data[i + 1], data[i + 2]);
-          if (max > 60 && (max - min) / max > 0.35) colored++;
-          else neutral++;
-        }
-      }
-      if (colored >= 8) value = false;
-      else if (neutral >= 8) value = true;
-    } catch {
-      value = null;
-    }
-    ringCache.set(canvas, { time: now, value });
-    return value;
-  }
-
-  function storySeen(item) {
-    return labelledSeen(item) ?? ringSeen(item.tile);
-  }
-
-  function showStoryState(record) {
-    const state = record.seen === true ? 'seen' : record.seen === false ? 'unseen' : 'unknown';
-    if (record.card.getAttribute(storyStateAttr) !== state) record.card.setAttribute(storyStateAttr, state);
-    const name = state === 'unknown' ? record.label : record.label + (state === 'seen' ? ', seen' : ', new');
-    if (record.card.getAttribute('aria-label') !== name) record.card.setAttribute('aria-label', name);
-  }
-
-  function storyDetails(item) {
-    const { element, tile } = item;
-    const href = element.matches(storyLinks) && routeFor(hrefOf(element)) === 'viewer' ? element.href : '';
-    const avatar = tile.querySelector('img');
-    const image = avatar?.currentSrc || avatar?.src || '';
-    const own = hasName(element, labels.ownStory) || hasName(element, labels.story);
-    const storyUser = href && pathname(urlFor(href)).split('/')[2];
-    const text = element.textContent.trim().replace(/\s+/g, ' ');
-    const label = own ? 'Your story' : text || storyUser || nameOf(element) || avatar?.alt || 'Story';
-    const key = own ? 'own' : storyUser ? 'user:' + storyUser.toLowerCase() :
-      'tile:' + label.toLowerCase() + ':' + image;
-    return { key, href, image, label };
-  }
-
-  function liveStoryNode(record) {
-    const node = record.native;
-    if (!node?.isConnected || !record.tile?.isConnected) return null;
-    return storyDetails({ element: node, tile: record.tile }).key === record.key ? node : null;
-  }
-
-  const pause = ms => new Promise(resolve => window.setTimeout(resolve, ms));
-
-  // Instagram's strip is virtualised: only items near its scroll position
-  // exist in the DOM, and it is rebuilt (scrolled back to the start) after
-  // closing a story. Scroll the hidden strip until the story's item exists
-  // again, then open it, instead of giving up and showing the strip.
-  async function findStoryNode(record) {
-    let node = liveStoryNode(record);
-    if (node) return node;
-    const scrollers = () => [...storySources].flatMap(storyScrollers);
-    for (const scroller of scrollers()) scroller.scrollLeft = record.offset || 0;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      await pause(120);
-      refresh();
-      if ((node = liveStoryNode(record))) return node;
-    }
-    for (const scroller of scrollers()) scroller.scrollLeft = 0;
-    for (let step = 0; step < 40; step++) {
-      await pause(150);
-      refresh();
-      if ((node = liveStoryNode(record))) return node;
-      const paging = storyPagingControl();
-      if (!paging) break;
-      if (paging.next) paging.next.click();
-      else paging.scroller.scrollLeft += Math.max(paging.scroller.clientWidth - 48, 32);
-    }
-    return null;
-  }
-
-  let openingStory = false;
-
-  async function openOriginalStory(record) {
-    if (openingStory) return;
-    openingStory = true;
-    record.card.setAttribute('aria-busy', 'true');
-    try {
-      const node = await findStoryNode(record);
-      if (currentView !== 'stories') return;
-      if (node) {
-        node.click();
-        return;
-      }
-      // Last resort: show Instagram's own strip at the story's position.
-      setNativeStoryLayout(true);
-      for (const scroller of [...storySources].flatMap(storyScrollers)) scroller.scrollLeft = record.offset || 0;
-      setStatus('Couldn’t open that story from the grid. Tap it in the strip.');
-    } finally {
-      openingStory = false;
-      record.card.removeAttribute('aria-busy');
-    }
-  }
-
-  function addStoryRecords(items, source) {
-    const scroller = storyScrollers(source)[0];
-    for (const item of items) {
-      const info = storyDetails(item);
-      let record = storyRecords.get(info.key);
-      if (!record) {
-        record = { ...info };
-        storyRecords.set(info.key, record);
-        const card = info.href ? control('a', '', { href: info.href }) :
-          control('button', '', { onClick: () => openOriginalStory(record) });
-        card.setAttribute(storyTileAttr, '');
-        if (info.key === 'own') card.setAttribute('data-ig-focus-own', '');
-        const avatar = document.createElement('span');
-        avatar.setAttribute('aria-hidden', 'true');
-        avatar.textContent = info.label.slice(0, 1).toUpperCase();
-        const caption = document.createElement('span');
-        caption.textContent = info.label;
-        card.append(avatar, caption);
-        record.card = card;
-        record.avatar = avatar;
-        storyGrid.append(card);
-      }
-      if (info.href && record.card.matches('a') && hrefOf(record.card) !== info.href) {
-        record.card.setAttribute('href', info.href);
-      }
-      if (info.image && !record.avatar.querySelector('img')) {
-        const picture = document.createElement('img');
-        picture.src = info.image;
-        picture.alt = '';
-        record.avatar.replaceChildren(picture);
-      }
-      const seen = storySeen(item);
-      if (seen !== null) record.seen = seen;
-      showStoryState(record);
-      record.native = item.element;
-      record.tile = item.tile;
-      record.scroller = scroller;
-      record.offset = scroller?.scrollLeft || 0;
-    }
-  }
-
-
-  // Instagram sometimes leaves an element drawn over the Stories grid after a
-  // story is closed (a dark box at the top of the screen). Find anything that
-  // is not this script's UI but paints over the visible part of the grid and
-  // make it transparent. Real menus and panels stay visible: an element is
-  // only hidden when it has no text or buttons, or when it appeared right
-  // after leaving the story viewer.
-  function describe(element) {
-    const rect = element.getBoundingClientRect();
-    return element.tagName.toLowerCase() +
-      (element.getAttribute('role') ? '[role=' + element.getAttribute('role') + ']' : '') +
-      (element.getAttribute('aria-label') ? '[aria-label="' + element.getAttribute('aria-label') + '"]' : '') +
-      ' ' + getComputedStyle(element).position + ' ' +
-      Math.round(rect.left) + ',' + Math.round(rect.top) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height);
-  }
-
-  function paints(element, style) {
-    if (/^(?:img|video|canvas|svg|picture)$/i.test(element.tagName)) return true;
-    const background = style.backgroundColor;
-    return (background && background !== 'transparent' && !/rgba\([^)]*,\s*0\)$/.test(background)) ||
-      style.backgroundImage !== 'none';
-  }
-
-  function hasContent(element) {
-    if (element.innerText?.trim()) return true;
-    return [...element.querySelectorAll(controlSelector)].some(control =>
-      control.getClientRects().length > 0 && canActivate(control));
-  }
-
-  function findCovers() {
-    const next = new Set();
-    if (currentView !== 'stories' || showNativeStories || !storyPanel?.isConnected || !storyGrid || storyGrid.hidden) return next;
-    const area = storyGrid.getBoundingClientRect();
-    const top = Math.max(area.top, 0);
-    const bottom = Math.min(area.bottom, innerHeight);
-    if (bottom - top < 20) return next;
-    const justLeftViewer = performance.now() - leftViewerAt < 6000;
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
-      acceptNode(element) {
-        if (element.hasAttribute(chrome) || element.matches('script, style, template, link, meta')) return NodeFilter.FILTER_REJECT;
-        const style = getComputedStyle(element);
-        if (style.display === 'none') return NodeFilter.FILTER_REJECT;
-        // Already hidden by this script (its opacity is ours): keep it hidden.
-        if (element.hasAttribute(coverAttr)) {
-          next.add(element);
-          return NodeFilter.FILTER_REJECT;
-        }
-        if (style.opacity === '0') return NodeFilter.FILTER_REJECT;
-        if (style.visibility === 'hidden' || element.contains(storyPanel)) return NodeFilter.FILTER_SKIP;
-        const rect = element.getBoundingClientRect();
-        const overlap = Math.min(rect.bottom, bottom) - Math.max(rect.top, top);
-        const width = Math.min(rect.right, area.right) - Math.max(rect.left, area.left);
-        if (overlap < 40 || width < area.width * 0.3 || !paints(element, style)) return NodeFilter.FILTER_SKIP;
-        // Keep the outermost painting element whose subtree holds nothing of
-        // ours. Story sources stay laid out (only made transparent).
-        let cover = element;
-        for (let parent = element.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
-          if (parent.contains(storyPanel) || parent.hasAttribute(branch) || parent.hasAttribute(keep) && !parent.matches(overlays)) break;
-          cover = parent;
-        }
-        if (!justLeftViewer && hasContent(cover)) return NodeFilter.FILTER_SKIP;
-        next.add(cover);
-        return NodeFilter.FILTER_REJECT;
-      }
-    });
-    while (walker.nextNode()) {
-      // acceptNode does the work.
-    }
-    return next;
-  }
-
-  function updateCovers(force = false) {
-    const now = performance.now();
-    if (!force && now - lastCoverScan < 400) return;
-    lastCoverScan = now;
-    const next = findCovers();
-    for (const element of next) {
-      if (!covers.has(element)) console.info('[Instagram Unreeled] hid an element covering the Stories grid:', describe(element));
-    }
-    covers = setMarks(coverAttr, covers, next);
-  }
-
   function isolateStories(controls) {
     const content = new Set();
     const branches = new Set();
-    const sources = new Map();
 
     if (currentView === 'stories' && document.body) {
       const regions = new Map();
@@ -1154,7 +796,6 @@
         const source = storySource(region, items);
         if (source) {
           content.add(source);
-          sources.set(source, items);
         } else {
           for (const { tile } of items) content.add(tile);
         }
@@ -1168,29 +809,6 @@
 
     storyContent = setMarks(keep, storyContent, content);
     storyBranches = setMarks(branch, storyBranches, branches);
-    storySources = setMarks(storySourceAttr, storySources, new Set(sources.keys()));
-    const showPanel = currentView === 'stories' && (sources.size || storyRecords.size);
-    if (!showPanel) {
-      storyPanel?.remove();
-      if (!['stories', 'viewer'].includes(currentView)) {
-        showNativeStories = false;
-        storyRecords.clear();
-        storyGrid?.replaceChildren();
-      }
-      return;
-    }
-    mountStoryPanel();
-    for (const [source, items] of sources) {
-      const mode = showNativeStories ? 'visible' : 'background';
-      if (source.getAttribute(storySourceAttr) !== mode) source.setAttribute(storySourceAttr, mode);
-      addStoryRecords(items, source);
-    }
-    const hidePaging = showNativeStories || !storyPagingControl();
-    if (storyGrid.hidden !== showNativeStories) storyGrid.hidden = showNativeStories;
-    if (moreStories.hidden !== hidePaging) moreStories.hidden = hidePaging;
-    if (moreStories.disabled !== pagingStories) moreStories.disabled = pagingStories;
-    const layoutText = showNativeStories ? 'Show Stories grid' : 'Use original Stories strip';
-    if (storyLayoutButton.textContent !== layoutText) storyLayoutButton.textContent = layoutText;
   }
 
   function installStyles(root) {
@@ -1210,124 +828,11 @@
           display: none !important;
         }
 
-        /* The native strip stays laid out so the grid can read and page it,
-           but nothing inside it may paint or take taps. visibility: hidden
-           alone can be undone by any descendant with visibility: visible,
-           which showed up as a large dark box over the grid after closing a
-           story. Opacity and z-index apply to the whole subtree. */
-        html[${viewAttr}="stories"] [${storySourceAttr}="background"] {
-          position: fixed !important;
-          inset: 0 0 auto !important;
-          z-index: -1 !important;
-          visibility: hidden !important;
-          opacity: 0 !important;
-          pointer-events: none !important;
+        /* Instagram renders home's loading state as a full-screen column with
+           the strip centred in it; keep the strip at the top. */
+        html[${viewAttr}="stories"] :is(main, [role="main"])[${branch}] {
+          justify-content: flex-start !important;
         }
-        html[${viewAttr}="stories"] [${storySourceAttr}="background"] * {
-          pointer-events: none !important;
-        }
-        /* Instagram's page stays mounted so the strip keeps working, but it
-           must not take up room. After a story closes, Instagram re-renders
-           home in a full-screen loading layout; left in the flow, that empty
-           screen sat above the grid as a dark box. Grid layout only: the
-           original strip layout shows Instagram's page as it is. */
-        html[${viewAttr}="stories"] body:has(> [${chrome}="story-panel"] > [${storyGridAttr}]:not([hidden])) > [${branch}]:not([${keep}]) {
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
-          width: 100% !important;
-          height: 0 !important;
-          min-height: 0 !important;
-          overflow: visible !important;
-          z-index: -1 !important;
-          visibility: hidden !important;
-          pointer-events: none !important;
-        }
-        [${storyGridAttr}] {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(min(100%, 76px), 1fr));
-          gap: 14px 8px;
-          padding: 12px max(12px, env(safe-area-inset-right, 0px)) 12px max(12px, env(safe-area-inset-left, 0px));
-        }
-        [${storyTileAttr}] {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          gap: 6px;
-          min-width: 0;
-          padding: 4px 0;
-          border: 0;
-          color: inherit;
-          background: transparent;
-          font: inherit;
-          font-size: 12px;
-          text-decoration: none;
-          cursor: pointer;
-        }
-        [${storyTileAttr}] > span:first-child {
-          box-sizing: border-box;
-          display: grid;
-          place-items: center;
-          width: 62px;
-          height: 62px;
-          border: 2px solid var(--ig-focus-border);
-          border-radius: 50%;
-          overflow: hidden;
-          font-size: 23px;
-        }
-        [${storyTileAttr}] img {
-          box-sizing: border-box;
-          display: block;
-          width: 100%;
-          height: 100%;
-          border-radius: 50%;
-          object-fit: cover;
-        }
-        /* Your story first, then new stories, then the ones already watched. */
-        [${storyTileAttr}][data-ig-focus-own] { order: -1; }
-        [${storyTileAttr}][${storyStateAttr}="seen"] { order: 1; }
-        [${storyTileAttr}][${storyStateAttr}="unseen"] > span:first-child {
-          padding: 3px;
-          border: 0;
-          background: linear-gradient(45deg, #fdc468, #f56040 35%, #e1306c 60%, #a83ab4 85%, #5b51d8);
-        }
-        [${storyTileAttr}][${storyStateAttr}="unseen"] img {
-          border: 2px solid var(--ig-focus-background);
-        }
-        [${storyTileAttr}][${storyStateAttr}="unseen"] > span:last-child { font-weight: 600; }
-        [${storyTileAttr}][${storyStateAttr}="seen"] > span:first-child {
-          padding: 3px;
-          border: 1px solid var(--ig-focus-border);
-        }
-        [${storyTileAttr}][${storyStateAttr}="seen"] img { opacity: 0.55; }
-        [${storyTileAttr}][${storyStateAttr}="seen"] > span:last-child { opacity: 0.6; }
-        [${storyTileAttr}] > span:last-child {
-          max-width: 100%;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        [data-ig-focus-story-actions] {
-          display: flex;
-          flex-wrap: wrap;
-          justify-content: center;
-          gap: 8px;
-          padding: 8px 12px 16px;
-        }
-        [data-ig-focus-story-actions] button {
-          padding: 9px 12px;
-          border: 1px solid var(--ig-focus-border);
-          border-radius: 8px;
-          color: inherit;
-          background: transparent;
-          font: inherit;
-        }
-        [${chrome}="story-panel"] [hidden] { display: none !important; }
-        html[${viewAttr}="stories"] [${coverAttr}] {
-          opacity: 0 !important;
-          pointer-events: none !important;
-        }
-        html[${viewAttr}="stories"] [${coverAttr}] * { pointer-events: none !important; }
 
         body:has(> [${chrome}="bottom"]) {
           padding-bottom: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
@@ -1441,7 +946,6 @@
       if (ownProfile !== previousProfile) syncRoute();
     }
     isolateStories(controls);
-    updateCovers();
   }
 
   let refreshPending = false;
@@ -1470,6 +974,5 @@
   // Isolated extension worlds cannot see page-side History API calls.
   window.setInterval(() => {
     if (location.href !== lastCheckedURL) refresh();
-    else if (currentView === 'stories' && !showNativeStories && document.body) updateCovers();
   }, 150);
 })();
