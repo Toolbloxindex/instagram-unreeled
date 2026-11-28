@@ -2,6 +2,11 @@
 
 A userscript that turns instagram.com into a distraction-free messenger.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="Instagram Unreeled on iPhone Safari: Messages, Stories and profile tabs" width="300">
+</p>
+<p align="center"><a href="docs/demo.mp4">Watch as video</a> · iPhone, Safari</p>
+
 - **Blocked:** Reels, Explore, Search and the Home feed. Reel links redirect to your messages.
 - **Kept:** Direct Messages, Stories, notifications, your profile, settings and account switching.
 - **Stories:** Instagram's own stories strip, at the top of an otherwise empty page, with no feed underneath.
